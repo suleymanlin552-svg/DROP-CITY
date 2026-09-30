@@ -1,0 +1,87 @@
+name: Build DROP CITY APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'DROP_CITY_android_project.zip'
+      - '.github/workflows/build-apk.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download project
+        uses: actions/checkout@v4
+
+      - name: Extract project ZIP
+        run: |
+          unzip -q DROP_CITY_android_project.zip -d extracted
+          echo "Project files:"
+          find extracted -maxdepth 4 -type f | head -100
+
+      - name: Find Capacitor project
+        id: project
+        shell: bash
+        run: |
+          CONFIG=$(find extracted -type f \( \
+            -name capacitor.config.json -o \
+            -name capacitor.config.ts -o \
+            -name capacitor.config.js \
+          \) -print -quit)
+
+          if [ -z "$CONFIG" ]; then
+            echo "Capacitor config not found"
+            exit 1
+          fi
+
+          APP_DIR=$(dirname "$CONFIG")
+          echo "app_dir=$APP_DIR" >> "$GITHUB_OUTPUT"
+          echo "Using project: $APP_DIR"
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Install dependencies and sync Android
+        working-directory: ${{ steps.project.outputs.app_dir }}
+        run: |
+          npm install
+          npx cap sync android
+
+      - name: Build APK
+        shell: bash
+        run: |
+          ANDROID_DIR="${{ steps.project.outputs.app_dir }}/android"
+
+          if [ -f "$ANDROID_DIR/gradlew" ]; then
+            cd "$ANDROID_DIR"
+            chmod +x gradlew
+            ./gradlew assembleDebug
+          else
+            gradle -p "$ANDROID_DIR" assembleDebug
+          fi
+
+      - name: Save APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: DROP-CITY-APK
+          path: ${{ steps.project.outputs.app_dir }}/android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 7
